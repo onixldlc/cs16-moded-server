@@ -1,0 +1,82 @@
+# Modded Counter-Strike 1.6 server: ReHLDS + ReGameDLL_CS + Metamod-R + PugMod + zBot
+# bots + Reunion (non-Steam clients). YaPB ships too, one env away.
+#
+#   docker compose up -d
+#   docker compose logs -f
+#
+# The FIRST start downloads ~544 MB of game content from Steam into the hlds-content
+# volume. That takes minutes, not seconds -- the server is unreachable until the log
+# says "content ready". Every start after that is immediate.
+#
+# Nothing here redistributes Valve content: each deployment fetches its own copy with
+# steamcmd under its own Steam Subscriber Agreement.
+#
+# Updating:  docker compose pull && docker compose up -d
+# Engine, game dll and mods are re-installed from the image; game content is untouched.
+#
+# Server console (HLDS reads commands from stdin):  docker attach cs16-moded-server
+# Detach without killing it: Ctrl-P Ctrl-Q
+
+services:
+  cs16:
+    image: ghcr.io/onixldlc/cs16-moded-server:latest
+    container_name: cs16-moded-server
+    restart: unless-stopped
+
+    # Host 8222 -> the engine's stock 27015 inside the container. Change the LEFT side
+    # to move the public port; leave PORT alone.
+    ports:
+      - "8222:27015/udp"
+
+    environment:
+      # No VAC, so no Steam account and no Game Server Login Token is needed.
+      # For a VAC-secure public server: INSECURE=0 and STEAM_ACCOUNT=<token>.
+      INSECURE: "1"
+      MAP: de_dust2
+      MAXPLAYERS: "12"
+      SV_LAN: "0"
+      #STEAM_ACCOUNT: ""
+
+      # RCON is always on. Leave RCON_PASSWORD unset and a 32-char password is generated
+      # on first start, printed in the log and remembered in the content volume:
+      #   docker compose logs | grep "RCON is ON"
+      # Pin your own instead, or set RCON_ENABLED: "0" to turn RCON off.
+      #RCON_PASSWORD: ""
+
+      # Bots are zBot, inside ReGameDLL's cs.so. They need maps/*.nav, which CS 1.6 does
+      # not ship -- ZBOT_NAV=czero (default) fetches Condition Zero's with steamcmd on
+      # first start and keeps only the meshes. Set ZBOT_NAV=none if you supply your own.
+      #ZBOT_NAV: "czero"
+
+      # Reunion: what happens to clients with no Steam ticket (protocol 47/48).
+      # allow (default) gives them a generated STEAM_x:y:z id from their IP, valve makes
+      # it VALVE_x:y:z, reject drops them. Rewrites cid_NoSteam47/48 in
+      # cstrike/reunion.cfg on every start; the rest of that file stays yours.
+      #REUNION_NOSTEAM: "allow"
+
+      # Your own console commands, one per line. Applied after server.cfg, so these win.
+      EXTRA_CVARS: |
+        mp_consistency 0
+
+      # Stage the download inside the volume so moving it into place is a rename rather
+      # than a 544 MB copy. The default (/tmp/hlds-fetch) sits on the container
+      # filesystem: double the space, and in RAM if /tmp is a tmpfs.
+      STAGE_DIR: /opt/hlds/.staging
+
+      # Set to 1 for one start to re-download and re-prune the game content.
+      #FORCE_REFETCH: "1"
+
+    volumes:
+      # Game content (~544 MB), fetched once.
+      - hlds-content:/opt/hlds
+      # Plugins and their configs, kept separate so hand-installed plugins and edited
+      # cfgs survive an image update. The image reinstalls its own mods here only when
+      # its version marker changes.
+      - hlds-addons:/opt/hlds/cstrike/addons
+
+    stdin_open: true
+    tty: true
+
+volumes:
+  hlds-content:
+  hlds-addons:
