@@ -1,9 +1,9 @@
 #!/bin/sh
 # Open an RCON prompt on the running server, from the repo, with nothing to type.
 #
-#   ./bin/rcon.sh                     interactive prompt
-#   ./bin/rcon.sh status              one command, then exit
-#   ./bin/rcon.sh "changelevel de_aztec"
+#   ./bin/rcon                        interactive prompt
+#   ./bin/rcon status                 one command, then exit
+#   ./bin/rcon "changelevel de_aztec"
 #
 # This is the host-side wrapper: it finds the running container and execs the `rcon` client
 # that lives inside it, which already knows the password (it reads the generated one out of
@@ -58,16 +58,16 @@ compose_id=$($engine compose ps -q "$SERVICE" 2>/dev/null || true)
 
 if [ -n "$compose_id" ]; then
 	if [ "$interactive" = "1" ]; then
-		exec $engine compose exec "$SERVICE" rcon "$@"
+		exec $engine compose exec "$SERVICE" rcon.sh "$@"
 	fi
-	exec $engine compose exec -T "$SERVICE" rcon "$@"
+	exec $engine compose exec -T "$SERVICE" rcon.sh "$@"
 fi
 
 if $engine inspect "$CONTAINER" >/dev/null 2>&1; then
 	if [ "$interactive" = "1" ]; then
-		exec $engine exec -it "$CONTAINER" rcon "$@"
+		exec $engine exec -it "$CONTAINER" rcon.sh "$@"
 	fi
-	exec $engine exec -i "$CONTAINER" rcon "$@"
+	exec $engine exec -i "$CONTAINER" rcon.sh "$@"
 fi
 
 die "no running server found: compose service '$SERVICE' has no container, and none named '$CONTAINER' exists

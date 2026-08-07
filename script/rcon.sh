@@ -3,7 +3,7 @@
 #
 #   docker compose exec cs16 rcon                 -> prompt, already connected
 #   docker compose exec cs16 rcon status          -> one command, then exit
-#   docker exec -it cs16-moded-server rcon.sh     -> same thing, either name works
+#   docker exec -it cs16-moded-server rcon.sh     -> same thing; `rcon` is an alias
 #
 # Nothing to type: the password comes out of cstrike/.rcon_password in the volume, which is
 # where configure-server.sh put the one it generated, and the target is 127.0.0.1:27015

@@ -123,12 +123,12 @@ An id generated from an IP is not an identity: it changes when the player's IP c
 and everyone behind one NAT shares one. Admin lists keyed on those ids are worth that
 much. `sv_lan 0` + `-insecure` is already the default here, so this adds no VAC exposure.
 
-## Driving the server: `bin/rcon.sh`
+## Driving the server: `bin/rcon`
 
 From the repo, against a `compose up -d` server, with nothing to type:
 
 ```bash
-./bin/rcon.sh
+./bin/rcon
 rcon 127.0.0.1:27015 — connected. 'exit' or Ctrl-D to leave, 'help' for server help.
 rcon> status
 rcon> changelevel de_aztec
@@ -138,19 +138,19 @@ rcon> exit
 One command and out, for scripts:
 
 ```bash
-./bin/rcon.sh status
-./bin/rcon.sh "bot_quota 4"
+./bin/rcon status
+./bin/rcon "bot_quota 4"
 ```
 
-`bin/rcon.sh` is only a finder: it locates the running container — compose service first
+`bin/rcon` is only a finder: it locates the running container — compose service first
 (`SERVICE`, default `cs16`), plain container second (`CONTAINER`, default
 `cs16-moded-server`) — and runs the real client inside it. docker and podman both work,
 picked automatically or forced with `ENGINE`. Straight at the container works too, either
 spelling:
 
 ```bash
-docker compose exec cs16 rcon
-docker exec -it cs16-moded-server rcon.sh
+docker compose exec cs16 rcon.sh
+docker exec -it cs16-moded-server rcon
 ```
 
 Why bother, when `docker attach` exists: attach hands you the server's *own* stdin console,
@@ -165,7 +165,7 @@ history. `RCON_HOST`, `RCON_PORT`, `RCON_PASSWORD`, `RCON_TIMEOUT`, `RCON_QUIET`
 if you point it elsewhere.
 
 No new package in the image: GoldSrc RCON is a challenge/response over UDP and `bash` does
-UDP through `/dev/udp`, so the whole client is `docker/rcon.sh`. The password is assembled
+UDP through `/dev/udp`, so the whole client is `script/rcon.sh`, installed on `PATH`. The password is assembled
 into the packet inside the shell, never as an argument, so `ps` in the container cannot see
 it. A stale challenge is refreshed silently, so a prompt left open all afternoon keeps
 working. Exit status is `2` on a bad password.
@@ -264,8 +264,8 @@ docker/Dockerfile          two stages: fetch the mod releases, layer them on cs1
 docker/entrypoint.sh       content -> mods -> hand over to the base entrypoint
 docker/install-mods.sh     marker-based sync into the volumes
 docker/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
-docker/rcon.sh             the `rcon` client; GoldSrc RCON over bash's /dev/udp
-bin/rcon.sh                host-side wrapper: finds the container, opens the prompt
+script/rcon.sh             the client that ships into the image as /usr/local/bin/rcon.sh
+bin/rcon                   run this: finds the container, opens the prompt
 docker/verify.sh           image self-check
 docker-compose.yml         what you actually run
 ```

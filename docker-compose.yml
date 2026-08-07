@@ -19,10 +19,10 @@
 #
 # Easier: an RCON prompt. No attaching, no password to type -- it reads the generated one
 # out of the volume. From the repo:
-#   ./bin/rcon.sh                             prompt
-#   ./bin/rcon.sh status                      one command
+#   ./bin/rcon                                prompt
+#   ./bin/rcon status                         one command
 # or straight at the container:
-#   docker compose exec cs16 rcon
+#   docker compose exec cs16 rcon.sh
 #   docker compose exec cs16 rcon "changelevel de_aztec"
 
 services:

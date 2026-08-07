@@ -27,8 +27,8 @@ test -x /usr/local/bin/server-entrypoint.sh || fail "missing server-entrypoint.s
 test -x /usr/local/bin/install-mods.sh    || fail "missing install-mods.sh"
 test -x /usr/local/bin/configure-server.sh || fail "missing configure-server.sh"
 test -x /usr/local/bin/fetch-nav.sh       || fail "missing fetch-nav.sh"
-test -x /usr/local/bin/rcon               || fail "missing rcon"
-test -x /usr/local/bin/rcon.sh            || fail "missing the rcon.sh alias"
+test -x /usr/local/bin/rcon.sh            || fail "missing rcon.sh"
+test -x /usr/local/bin/rcon               || fail "missing the rcon alias"
 
 # rcon speaks UDP through bash's /dev/udp, so bash specifically has to be there -- the
 # base image's /bin/sh is dash and cannot do it.

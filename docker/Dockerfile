@@ -167,13 +167,12 @@ COPY docker/configure-server.sh /usr/local/bin/configure-server.sh
 
 COPY docker/fetch-nav.sh /usr/local/bin/fetch-nav.sh
 
-# Installed under the bare name `rcon`, and again as `rcon.sh` -- both spellings work, so
-# neither `docker compose exec cs16 rcon` nor `... rcon.sh` has to be looked up:
-#   docker compose exec cs16 rcon           interactive prompt
+# On PATH under its own name, so it is callable with no path at all, plus a short alias:
+#   docker compose exec cs16 rcon.sh        interactive prompt
 #   docker compose exec cs16 rcon status    one command
-COPY docker/rcon.sh /usr/local/bin/rcon
+COPY script/rcon.sh /usr/local/bin/rcon.sh
 
-RUN ln -sf /usr/local/bin/rcon /usr/local/bin/rcon.sh
+RUN ln -sf /usr/local/bin/rcon.sh /usr/local/bin/rcon
 
 COPY docker/verify.sh /usr/local/bin/verify.sh
 
@@ -181,7 +180,7 @@ RUN chmod +x /usr/local/bin/moded-entrypoint.sh \
         /usr/local/bin/install-mods.sh \
         /usr/local/bin/configure-server.sh \
         /usr/local/bin/fetch-nav.sh \
-        /usr/local/bin/rcon \
+        /usr/local/bin/rcon.sh \
         /usr/local/bin/verify.sh
 
 # zBot refuses to run on a DEDICATED server unless bot_enable is 1, and cs.so reads that
