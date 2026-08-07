@@ -123,6 +123,56 @@ An id generated from an IP is not an identity: it changes when the player's IP c
 and everyone behind one NAT shares one. Admin lists keyed on those ids are worth that
 much. `sv_lan 0` + `-insecure` is already the default here, so this adds no VAC exposure.
 
+## Driving the server: `bin/rcon.sh`
+
+From the repo, against a `compose up -d` server, with nothing to type:
+
+```bash
+./bin/rcon.sh
+rcon 127.0.0.1:27015 — connected. 'exit' or Ctrl-D to leave, 'help' for server help.
+rcon> status
+rcon> changelevel de_aztec
+rcon> exit
+```
+
+One command and out, for scripts:
+
+```bash
+./bin/rcon.sh status
+./bin/rcon.sh "bot_quota 4"
+```
+
+`bin/rcon.sh` is only a finder: it locates the running container — compose service first
+(`SERVICE`, default `cs16`), plain container second (`CONTAINER`, default
+`cs16-moded-server`) — and runs the real client inside it. docker and podman both work,
+picked automatically or forced with `ENGINE`. Straight at the container works too, either
+spelling:
+
+```bash
+docker compose exec cs16 rcon
+docker exec -it cs16-moded-server rcon.sh
+```
+
+Why bother, when `docker attach` exists: attach hands you the server's *own* stdin console,
+shared with the process, and leaving it without `Ctrl-P Ctrl-Q` takes the server down with
+you. An RCON prompt is a separate session you can open and close at will, which is what you
+want on a server that is meant to stay up.
+
+The client reads `cstrike/.rcon_password` from the volume — the password
+`configure-server.sh` generated on first start — and talks to `127.0.0.1:27015` inside the
+container, so nothing needs to be reachable from outside and no password touches your shell
+history. `RCON_HOST`, `RCON_PORT`, `RCON_PASSWORD`, `RCON_TIMEOUT`, `RCON_QUIET` override
+if you point it elsewhere.
+
+No new package in the image: GoldSrc RCON is a challenge/response over UDP and `bash` does
+UDP through `/dev/udp`, so the whole client is `docker/rcon.sh`. The password is assembled
+into the packet inside the shell, never as an argument, so `ps` in the container cannot see
+it. A stale challenge is refreshed silently, so a prompt left open all afternoon keeps
+working. Exit status is `2` on a bad password.
+
+Note PugMod's `server.cfg` sets `sv_rcon_maxfailures 5` / `sv_rcon_banpenalty 60`: five
+wrong passwords and your IP sits out an hour.
+
 ## Your own cvars
 
 `EXTRA_CVARS` takes console commands, one per line:
@@ -214,6 +264,8 @@ docker/Dockerfile          two stages: fetch the mod releases, layer them on cs1
 docker/entrypoint.sh       content -> mods -> hand over to the base entrypoint
 docker/install-mods.sh     marker-based sync into the volumes
 docker/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
+docker/rcon.sh             the `rcon` client; GoldSrc RCON over bash's /dev/udp
+bin/rcon.sh                host-side wrapper: finds the container, opens the prompt
 docker/verify.sh           image self-check
 docker-compose.yml         what you actually run
 ```

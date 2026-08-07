@@ -27,11 +27,23 @@ test -x /usr/local/bin/server-entrypoint.sh || fail "missing server-entrypoint.s
 test -x /usr/local/bin/install-mods.sh    || fail "missing install-mods.sh"
 test -x /usr/local/bin/configure-server.sh || fail "missing configure-server.sh"
 test -x /usr/local/bin/fetch-nav.sh       || fail "missing fetch-nav.sh"
+test -x /usr/local/bin/rcon               || fail "missing rcon"
+test -x /usr/local/bin/rcon.sh            || fail "missing the rcon.sh alias"
+
+# rcon speaks UDP through bash's /dev/udp, so bash specifically has to be there -- the
+# base image's /bin/sh is dash and cannot do it.
+test -x /usr/bin/bash || test -x /bin/bash || fail "bash is missing — rcon needs /dev/udp"
 
 # zBot is skipped outright on a dedicated server unless this is set, and it has to be set
-# before the first map loads -- see docker/Dockerfile.
-grep -q '^bot_enable 1' /opt/dist/cstrike/game_init.cfg \
-	|| fail "game_init.cfg does not set bot_enable 1 — zBot would never run"
+# before the first map loads -- see docker/Dockerfile. The file is CRLF and the value is
+# quoted (bot_enable "1"\r), hence no anchor at the end of the pattern.
+grep -qE '^[[:space:]]*bot_enable[[:space:]]+"?1"?' /opt/dist/cstrike/game_init.cfg \
+	|| fail "game_init.cfg does not enable bot_enable — zBot would never run"
+
+# And nothing may leave a 0 behind it: cs.so keeps the last value in the file.
+if grep -qE '^[[:space:]]*bot_enable[[:space:]]+"?0"?' /opt/dist/cstrike/game_init.cfg; then
+	fail "game_init.cfg still has a bot_enable 0 line — zBot would be disabled"
+fi
 
 # --- the mods ---------------------------------------------------------------
 

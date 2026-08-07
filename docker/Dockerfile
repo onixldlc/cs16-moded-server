@@ -167,20 +167,38 @@ COPY docker/configure-server.sh /usr/local/bin/configure-server.sh
 
 COPY docker/fetch-nav.sh /usr/local/bin/fetch-nav.sh
 
+# Installed under the bare name `rcon`, and again as `rcon.sh` -- both spellings work, so
+# neither `docker compose exec cs16 rcon` nor `... rcon.sh` has to be looked up:
+#   docker compose exec cs16 rcon           interactive prompt
+#   docker compose exec cs16 rcon status    one command
+COPY docker/rcon.sh /usr/local/bin/rcon
+
+RUN ln -sf /usr/local/bin/rcon /usr/local/bin/rcon.sh
+
 COPY docker/verify.sh /usr/local/bin/verify.sh
 
 RUN chmod +x /usr/local/bin/moded-entrypoint.sh \
         /usr/local/bin/install-mods.sh \
         /usr/local/bin/configure-server.sh \
         /usr/local/bin/fetch-nav.sh \
+        /usr/local/bin/rcon \
         /usr/local/bin/verify.sh
 
 # zBot refuses to run on a DEDICATED server unless bot_enable is 1, and cs.so reads that
 # cvar before server.cfg is ever exec'd -- game_init.cfg is the documented place for it.
 # The base image copies /opt/dist/cstrike over the volume on every start, which would undo
-# a line written into the volume, so the line goes into the dist copy itself.
-RUN grep -q '^bot_enable' /opt/dist/cstrike/game_init.cfg \
-        || printf '\n// zBot needs this before the first map loads -- cs16-moded-server\nbot_enable 1\n' \
+# a line written into the volume, so the value is changed in the dist copy itself.
+#
+# The file already ships the cvar, set to 0 -- ReGameDLL's own default -- with CRLF line
+# endings and a quoted value:  bot_enable "0"\r
+# So the line is rewritten in place. Appending instead does nothing useful: cs.so keeps the
+# LAST value it reads, but a guard that merely looks for the cvar name matches the shipped
+# 0 and skips the append entirely, which is how v1.0.0 shipped with bots disabled.
+RUN sed -i -E 's|^([[:space:]]*bot_enable)[[:space:]]+.*|\1 "1"|' /opt/dist/cstrike/game_init.cfg
+
+# Belt and braces: if a future base image drops the cvar from the file, add it.
+RUN grep -qE '^[[:space:]]*bot_enable[[:space:]]+"?1"?' /opt/dist/cstrike/game_init.cfg \
+        || printf '\n// zBot needs this before the first map loads -- cs16-moded-server\nbot_enable "1"\n' \
                 >> /opt/dist/cstrike/game_init.cfg
 
 # Plugins live in their own volume so hand-installed ones and edited cfgs survive an

@@ -29,6 +29,14 @@ if [ "${1:-}" = "verify" ]; then
 	exec /usr/local/bin/verify.sh
 fi
 
+# `rcon` drives a server that is already running, so it is also not a server start. Handy
+# when the entrypoint is in the way:  docker exec <container> rcon status  works directly,
+# this form covers `docker compose run --rm cs16 rcon ...` against a reachable host.
+if [ "${1:-}" = "rcon" ]; then
+	shift
+	exec /usr/local/bin/rcon "$@"
+fi
+
 mkdir -p "$HLDS_DIR"
 
 # --- phase 1: game content --------------------------------------------------
