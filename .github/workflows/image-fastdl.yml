@@ -114,7 +114,7 @@ jobs:
           docker run -d --name fastdl-check -p 8080:80 -v "$root:/srv/hlds:ro" "$IMAGE"
 
           for _ in $(seq 30); do
-            curl -fsS -o /dev/null http://127.0.0.1:8080/cstrike/maps/test.bsp && break
+            curl -fsS -o /dev/null http://127.0.0.1:8080/cstrike/maps/test.bsp 2>/dev/null && break
             sleep 1
           done
 
@@ -163,7 +163,7 @@ jobs:
             -v "$root:/srv/hlds:ro" -v "$conf:/opt/fastdl" "$IMAGE"
 
           for _ in $(seq 30); do
-            curl -fsS -o /dev/null http://127.0.0.1:8081/cstrike/maps/test.bsp && break
+            curl -fsS -o /dev/null http://127.0.0.1:8081/cstrike/maps/test.bsp 2>/dev/null && break
             sleep 1
           done
 
@@ -183,9 +183,27 @@ jobs:
             echo "ok:   seeded config serves the map"
           fi
 
+          # Seeding must not take ownership of the operator's directory. The container is root,
+          # and `cp -a "$DIST/." "$DIR/"` stamps the source directory's own uid/gid onto the
+          # destination -- so a bind-mounted ./fastdl came back root:root and the host could no
+          # longer edit, or even delete, the config it had just been handed. That shipped once;
+          # this is the check that catches it coming back.
+          me="$(id -u)"
+          dir_uid="$(stat -c %u "$conf")"
+          file_uid="$(stat -c %u "$conf/default.conf.template" 2>/dev/null || echo -)"
+          if [[ "$dir_uid" != "$me" || "$file_uid" != "$me" ]]; then
+            echo "FAIL: seeding changed ownership (dir uid=$dir_uid, file uid=$file_uid, expected $me)"
+            fail=1
+          else
+            echo "ok:   the seeded config is still owned by uid $me"
+          fi
+
           docker logs fastdl-seed 2>&1 | grep '\[fastdl\]' || true
           docker rm -f fastdl-seed >/dev/null
-          rm -rf "$conf" "$root"
+          # Cleanup last, and never let it set the exit status: if the ownership fix ever
+          # regresses these paths are root-owned, and a failing rm would report as the error
+          # instead of the assertion above that actually explains why.
+          rm -rf "$conf" "$root" 2>/dev/null || sudo rm -rf "$conf" "$root" || true
 
           exit $fail
 

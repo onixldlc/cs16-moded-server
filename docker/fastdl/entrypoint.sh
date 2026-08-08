@@ -41,7 +41,19 @@ if [ -d "$FASTDL_CONF_DIR" ]; then
 	# `ls -A` is empty for a directory with nothing in it, including a fresh named volume or a
 	# host directory the operator just created.
 	if [ -z "$(ls -A "$FASTDL_CONF_DIR" 2>/dev/null)" ]; then
-		if cp -a "$DIST_DIR/." "$FASTDL_CONF_DIR/" 2>/dev/null; then
+		# Copy the files, and NOT `cp -a "$DIST_DIR/." "$FASTDL_CONF_DIR/"`: with -a and a `/.`
+		# source, cp applies the source directory's own ownership and mode to the destination
+		# directory too. On a bind mount that turns the operator's ./fastdl root-owned, and
+		# they can no longer edit -- or even delete -- the template they were just handed.
+		# Leave the directory exactly as they created it.
+		if cp "$DIST_DIR"/*.template "$FASTDL_CONF_DIR"/ 2>/dev/null; then
+			# This process is root, so the new file is root-owned on the host as well. Hand it
+			# to whoever owns the directory so editing it does not need sudo.
+			owner="$(stat -c '%u:%g' "$FASTDL_CONF_DIR" 2>/dev/null || echo '')"
+			if [ -n "$owner" ] && [ "$owner" != "0:0" ]; then
+				chown "$owner" "$FASTDL_CONF_DIR"/*.template 2>/dev/null || true
+			fi
+
 			log "seeded $FASTDL_CONF_DIR with the image's template — edit it and restart"
 		else
 			log "WARNING: $FASTDL_CONF_DIR is mounted, empty and not writable, so it cannot be"

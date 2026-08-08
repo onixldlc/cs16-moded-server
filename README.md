@@ -491,6 +491,10 @@ hide the baked template and nginx would render nothing at all — the same trap 
 `content/maps` onto `cstrike/maps`. So the template lives in a private directory inside the
 image and the entrypoint copies it into place, which is what makes an empty mount safe.
 
+The seeded file is handed to whoever owns the directory you mounted, so you can edit it as
+yourself. The container runs as root, and anything it writes into a bind mount is root-owned by
+default — a template you would then need `sudo` to change.
+
 The entrypoint only prepares the config, then hands over to `nginx`'s own
 `/docker-entrypoint.sh` — the `envsubst` step that turns `*.template` into a real config lives
 there and is not reimplemented.
