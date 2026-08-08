@@ -8,7 +8,7 @@
 #                          ReGameDLL's cs.so, this adds the data they need to run
 #     + YaPB               the other bot implementation. Installed but NOT loaded: it
 #                          conflicts with Reunion. The code that would load it is kept,
-#                          uncalled, in docker/install-mods.sh.
+#                          uncalled, in docker/server/install-mods.sh.
 #     + Reunion            lets non-Steam protocol 47/48 clients connect
 #
 # Nothing is compiled here. Every mod comes from a published release asset, pinned by
@@ -16,10 +16,10 @@
 # the base image still downloads it with steamcmd into a volume on first start.
 #
 # Build (context is the repo root):
-#   podman build -f docker/Dockerfile -t cs16-moded-server:latest .
+#   podman build -f docker/server/Dockerfile -t cs16-moded-server:latest .
 #
 # Override a mod version without editing this file:
-#   podman build -f docker/Dockerfile --build-arg PUGMOD_TAG=v1.0.2 -t … .
+#   podman build -f docker/server/Dockerfile --build-arg PUGMOD_TAG=v1.0.2 -t … .
 
 ARG BASE_IMAGE=ghcr.io/onixldlc/cs16-server:latest
 
@@ -183,15 +183,15 @@ RUN rm -rf /var/lib/apt/lists/*
 # volumes at start, so pulling a newer image and restarting is all an update takes.
 COPY --from=mods /opt/mods /opt/mods
 
-COPY docker/entrypoint.sh /usr/local/bin/moded-entrypoint.sh
+COPY docker/server/entrypoint.sh /usr/local/bin/moded-entrypoint.sh
 
-COPY docker/install-mods.sh /usr/local/bin/install-mods.sh
+COPY docker/server/install-mods.sh /usr/local/bin/install-mods.sh
 
-COPY docker/configure-server.sh /usr/local/bin/configure-server.sh
+COPY docker/server/configure-server.sh /usr/local/bin/configure-server.sh
 
-COPY docker/install-overlay.sh /usr/local/bin/install-overlay.sh
+COPY docker/server/install-overlay.sh /usr/local/bin/install-overlay.sh
 
-COPY docker/fetch-nav.sh /usr/local/bin/fetch-nav.sh
+COPY docker/server/fetch-nav.sh /usr/local/bin/fetch-nav.sh
 
 # On PATH under its own name, so it is callable with no path at all, plus a short alias:
 #   docker compose exec cs16 rcon.sh        interactive prompt
@@ -200,7 +200,7 @@ COPY script/rcon.sh /usr/local/bin/rcon.sh
 
 RUN ln -sf /usr/local/bin/rcon.sh /usr/local/bin/rcon
 
-COPY docker/verify.sh /usr/local/bin/verify.sh
+COPY docker/server/verify.sh /usr/local/bin/verify.sh
 
 RUN chmod +x /usr/local/bin/moded-entrypoint.sh \
         /usr/local/bin/install-mods.sh \
@@ -253,7 +253,7 @@ ENV REUNION=on
 
 # Drop-in directory for custom content. Mount a host directory here, laid out like
 # cstrike/, and everything in it is copied over the server on every start -- see
-# docker/install-overlay.sh. Empty or unmounted, it does nothing.
+# docker/server/install-overlay.sh. Empty or unmounted, it does nothing.
 ENV OVERLAY_DIR=/opt/overlay
 
 ENV ADDONS_DIR=/opt/hlds/cstrike/addons

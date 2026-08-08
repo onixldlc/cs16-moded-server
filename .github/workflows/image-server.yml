@@ -1,11 +1,11 @@
-name: Build and Push Docker Image
+name: Image (server)
 
 # Build strategy mirrors onixldlc/elkstack (buildx + ghcr + metadata-action + gha cache).
 # Versioning mirrors onixldlc/ReHLDS, ReGameDLL_CS and Metamod-R (tag -> ref name,
 # otherwise git describe), so all four repos read the same way.
 #
 # Only a pushed tag v* publishes. Nothing is compiled here: the image layers the pinned
-# mod releases onto ghcr.io/onixldlc/cs16-server, so a build is a download and a copy. Mod versions are the ARGs in docker/Dockerfile; workflow_dispatch can override
+# mod releases onto ghcr.io/onixldlc/cs16-server, so a build is a download and a copy. Mod versions are the ARGs in docker/server/Dockerfile; workflow_dispatch can override
 # them for a one-off build without editing the file.
 #
 # The post-push check runs on tag builds too, not only on non-publishing ones -- with
@@ -132,7 +132,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./docker/Dockerfile
+          file: ./docker/server/Dockerfile
           push: ${{ needs.determine-version.outputs.publish == 'true' }}
           load: ${{ needs.determine-version.outputs.publish != 'true' }}
           tags: ${{ steps.meta.outputs.tags }}

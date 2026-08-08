@@ -36,7 +36,7 @@ test -x /usr/local/bin/rcon               || fail "missing the rcon alias"
 test -x /usr/bin/bash || test -x /bin/bash || fail "bash is missing — rcon needs /dev/udp"
 
 # zBot is skipped outright on a dedicated server unless this is set, and it has to be set
-# before the first map loads -- see docker/Dockerfile. The file is CRLF and the value is
+# before the first map loads -- see docker/server/Dockerfile. The file is CRLF and the value is
 # quoted (bot_enable "1"\r), hence no anchor at the end of the pattern.
 grep -qE '^[[:space:]]*bot_enable[[:space:]]+"?1"?' /opt/dist/cstrike/game_init.cfg \
 	|| fail "game_init.cfg does not enable bot_enable — zBot would never run"

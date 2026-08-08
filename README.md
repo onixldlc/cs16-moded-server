@@ -13,7 +13,7 @@ A ready-to-run **modded Counter-Strike 1.6 server** in one image:
 | [Reunion](https://github.com/rehlds/ReUnion) | `reunion-*.zip` | lets clients with no Steam ticket connect |
 
 Nothing is compiled here and no game content is baked in. Mods come from published
-release assets pinned in `docker/Dockerfile`; the game content is downloaded from Steam
+release assets pinned in `docker/server/Dockerfile`; the game content is downloaded from Steam
 into a volume on first start.
 
 ## Run it
@@ -73,8 +73,8 @@ plugin is involved.
 YaPB is still downloaded, still installed into the addons volume, and still verified at
 build time — it is simply never put into `plugins.ini`, because loading it alongside
 Reunion aborts the server at boot (`free(): invalid pointer`). The code that would load it
-is kept and never called: `install_yapb_plugin()` in `docker/install-mods.sh` and
-`yapb_cvars()` in `docker/configure-server.sh`. Switching back means calling those two
+is kept and never called: `install_yapb_plugin()` in `docker/server/install-mods.sh` and
+`yapb_cvars()` in `docker/server/configure-server.sh`. Switching back means calling those two
 instead of the zBot path — no re-download, the files are already in the volume.
 
 Two things about zBot are worth knowing, because both are silent failures otherwise:
@@ -372,7 +372,7 @@ exception — see above.
 
 ## Bumping a mod version
 
-Edit the ARGs in `docker/Dockerfile`:
+Edit the ARGs in `docker/server/Dockerfile`:
 
 ```dockerfile
 ARG METAMOD_TAG=v1.3.0.149-r2
@@ -391,7 +391,7 @@ One-off build without editing the file: run the workflow via *Run workflow* and 
 the tag inputs, or locally:
 
 ```bash
-docker build -f docker/Dockerfile --build-arg PUGMOD_TAG=v1.0.2 -t cs16-moded-server:test .
+docker build -f docker/server/Dockerfile --build-arg PUGMOD_TAG=v1.0.2 -t cs16-moded-server:test .
 ```
 
 ## Check an image
@@ -406,15 +406,123 @@ the pinned mod versions.
 
 ## Layout
 
+Two images, one repo. The server, and the optional download mirror.
+
 ```
-docker/Dockerfile          two stages: fetch the mod releases, layer them on cs16-server
-docker/entrypoint.sh       content -> mods -> hand over to the base entrypoint
-docker/install-mods.sh     marker-based sync into the volumes
-docker/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
-docker/install-overlay.sh  copies the host drop-in directory over cstrike/ each start
-content/                   your drop-in directory: per-deployment, gitignored
-script/rcon.sh             the client that ships into the image as /usr/local/bin/rcon.sh
-bin/rcon                   run this: finds the container, opens the prompt
-docker/verify.sh           image self-check
-docker-compose.yml         what you actually run
+docker/server/Dockerfile          two stages: fetch the mod releases, layer them on cs16-server
+docker/server/entrypoint.sh       content -> mods -> overlay -> cvars -> base entrypoint
+docker/server/install-mods.sh     marker-based sync into the volumes
+docker/server/install-overlay.sh  copies your drop-in directory over cstrike/ each start
+docker/server/configure-server.sh rcon password, EXTRA_CVARS, bot cvars
+docker/server/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
+docker/server/verify.sh           image self-check
+docker/fastdl/Dockerfile          nginx, preconfigured for sv_downloadurl
+docker/fastdl/fastdl.conf.template its config: an allowlist, not a denylist
+script/rcon.sh                    the client that ships into the image as /usr/local/bin/rcon.sh
+bin/rcon                          run this: finds the container, opens the prompt
+docker-compose.yml                what you actually run
+content/                          your drop-in directory: per-deployment, gitignored
 ```
+
+```bash
+podman build -f docker/server/Dockerfile -t cs16-moded-server:latest .
+podman build -f docker/fastdl/Dockerfile -t cs16-fastdl:latest .
+```
+
+Both are built from the repo root, so `-f` points into the subdirectory while the context
+stays `.`.
+
+CI is split to match, one workflow per image: `.github/workflows/image-server.yml` and
+`image-fastdl.yml`. Same rules in both — a pushed tag `v*` publishes, `workflow_dispatch`
+builds without publishing, and each verifies the image it just built before the release is
+allowed to stand.
+
+## fastdl: HTTP downloads for clients
+
+Optional, and genuinely optional: the server plays identically without it. It only matters for
+clients that do not already have your custom content. Without it, a client missing a 17 MB map
+pulls it through the game's UDP socket at 10-20 KB/s while the join blocks.
+
+```bash
+podman run -d --name cs16-fastdl -p 8225:80 \
+    -v cs16-content:/srv/hlds:ro ghcr.io/onixldlc/cs16-fastdl:latest
+```
+
+Then on the server, with an address **your clients** can reach — the game client resolves it
+itself, so a container name or `localhost` fails for everyone:
+
+```
+sv_allowdownload 1
+sv_downloadurl "http://your-host:8225/cstrike"
+```
+
+The compose file carries the same thing as a commented service with the full instructions.
+
+It serves **the server's own content volume, read-only** — not a copy. So what a client
+downloads is byte-for-byte what the server runs: no sync step, and the mirror cannot hand out a
+map the server has already replaced.
+
+### Changing its config
+
+Mount a directory at `/opt/fastdl`. Empty on the first start means "seed me": the image writes
+its template there, on your host, ready to edit.
+
+```yaml
+    volumes:
+      - hlds-content:/srv/hlds:ro
+      - ./fastdl:/opt/fastdl
+```
+
+```
+[fastdl] seeded /opt/fastdl with the image's template — edit it and restart
+[fastdl] using 1 template(s) from /opt/fastdl
+```
+
+| `/opt/fastdl` | what happens |
+|---|---|
+| not mounted | the image's built-in config is used |
+| mounted, empty | seeded with the template, then used |
+| mounted, has `*.template` | yours — copied over the built-in one every start, read-only is fine |
+| mounted, empty, read-only | cannot be seeded; warns and falls back to built-in |
+
+The mount point is **not** `/etc/nginx/templates`, and that is deliberate. A mount hides what
+was underneath it, so mounting your own directory straight onto the templates directory would
+hide the baked template and nginx would render nothing at all — the same trap as mounting
+`content/maps` onto `cstrike/maps`. So the template lives in a private directory inside the
+image and the entrypoint copies it into place, which is what makes an empty mount safe.
+
+The entrypoint only prepares the config, then hands over to `nginx`'s own
+`/docker-entrypoint.sh` — the `envsubst` step that turns `*.template` into a real config lives
+there and is not reimplemented.
+
+### Why its config is an allowlist
+
+The game directory is not only client content. Next to the maps sit `cstrike/.rcon_password`
+and `cstrike/cs16-moded.cfg`, both holding the rcon password in plain text, plus `server.cfg`,
+`rehlds.cfg`, `reunion.cfg` and `addons/` with its adminlist. So only extensions a joining
+client actually needs are served, `addons/` is denied outright by a prefix location that beats
+the regex, and everything else — dotfiles included — is refused without being named. A new kind
+of file in the game directory is private by default.
+
+`.nav` is excluded too: bot navigation is server-side only, and it is ~10 MB nobody downloads.
+
+`image-fastdl.yml` asserts this in CI against a fake game directory — a map returns 200 while
+`.rcon_password`, `cs16-moded.cfg`, `server.cfg`, `addons/**`, `.nav` and directory listings all
+return 403, and it greps the response body to be sure the password is not served. Widening the
+allowlist by accident fails the build.
+
+Verified against the real thing:
+
+```
+cstrike/maps/de_mirage_cs2.bsp             206      Content-Type: application/octet-stream
+cstrike/cstrike.wad                        206      Content-Range present, so resumable
+cstrike/.rcon_password                     403
+cstrike/cs16-moded.cfg                     403
+cstrike/addons/pugmod/cfg/adminlist.cfg    403
+cstrike/maps/de_dust2.nav                  403
+cstrike/                                   403
+```
+
+GoldSrc clients cannot handle `Content-Encoding` on downloads, so `gzip off` is set — a gzipped
+`.bsp` arrives corrupt. (Compressed fastdl is a Source-engine convention and uses `.bz2` files,
+which HL1 does not read either.)

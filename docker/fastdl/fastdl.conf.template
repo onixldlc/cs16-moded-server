@@ -1,0 +1,59 @@
+# fastdl: serve the server's own game directory over HTTP, for sv_downloadurl.
+#
+# Rendered to /etc/nginx/conf.d/default.conf at container start by the nginx image's
+# envsubst step, so ${FASTDL_ROOT} comes from the environment. Only variables that are
+# actually defined get substituted, which is why nginx's own $uri survives.
+#
+# Point this at the SERVER'S CONTENT VOLUME, read-only. Then what a client downloads is
+# byte-for-byte what the server is running -- no copy of the content, no sync step, and no
+# way for the mirror to serve a map the server has since replaced.
+
+server {
+	listen 80 default_server;
+	server_name _;
+
+	root ${FASTDL_ROOT};
+
+	# Unknown extensions must not be guessed as text: nginx's stock default is text/plain.
+	default_type application/octet-stream;
+
+	# No directory listings -- that would enumerate the whole game directory.
+	autoindex off;
+
+	# One line per downloaded file, and a busy fastdl is thousands of them.
+	access_log off;
+
+	# GoldSrc clients do NOT handle Content-Encoding on downloads: a gzipped .bsp arrives
+	# corrupt. (Compressed fastdl is a Source-engine convention, and it uses .bz2 files, not
+	# transfer compression.)
+	gzip off;
+
+	# --- what is allowed out ------------------------------------------------------------
+	#
+	# The game directory holds more than client content. It also holds, right next to the
+	# maps:
+	#   .rcon_password     the rcon password, plain text
+	#   cs16-moded.cfg     also contains rcon_password
+	#   server.cfg, rehlds.cfg, reunion.cfg
+	#   addons/**          plugin binaries, adminlist.cfg
+	#
+	# So this is an ALLOWLIST. Anything without an extension below is refused without having
+	# to be named, which means a new kind of file appearing in the game directory is private
+	# by default rather than accidentally public.
+
+	# Denied before the allowlist can match: ^~ beats a regex location, so a .txt under
+	# addons/ is still refused.
+	location ^~ /cstrike/addons/ {
+		deny all;
+	}
+
+	# What a joining client actually downloads. .nav is deliberately absent: bot navigation
+	# is server-side only, and it is ~10 MB of files no client will ever read.
+	location ~* \.(bsp|wad|mdl|wav|mp3|spr|tga|bmp|txt|res)$ {
+		try_files $uri =404;
+	}
+
+	location / {
+		deny all;
+	}
+}

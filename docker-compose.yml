@@ -115,6 +115,64 @@ services:
     stdin_open: true
     tty: true
 
+  # --- fastdl: HTTP downloads for clients (optional) --------------------------------------
+  #
+  # WHAT IT IS. A client that joins without your custom maps downloads them through the game's
+  # own UDP socket at roughly 10-20 KB/s, one file at a time, blocking the join. For a 17 MB
+  # map that is about twenty minutes, and most people quit. sv_downloadurl points clients at
+  # plain HTTP instead: as fast as their connection, and resumable.
+  #
+  # DO YOU NEED IT. Only for clients that do not already have your content. If everyone
+  # installed the same pack by hand, or you run stock maps only, this changes nothing -- the
+  # server plays identically without it. CS does not require any of this.
+  #
+  # HOW IT WORKS. It serves the server's own content volume, read-only. Not a copy: what a
+  # client downloads is byte-for-byte what the server is running, so there is no sync step and
+  # the mirror can never hand out a map the server has already replaced.
+  #
+  # WHAT IT REFUSES, AND WHY THAT MATTERS. That volume is not only client content. Next to the
+  # maps sit cstrike/.rcon_password and cstrike/cs16-moded.cfg, both holding your rcon password
+  # in plain text, plus server.cfg, rehlds.cfg, reunion.cfg, and addons/ with its adminlist.
+  # The image's config is an allowlist: only bsp/wad/mdl/wav/mp3/spr/tga/bmp/txt/res are
+  # served, addons/ is denied outright, and anything else including dotfiles is refused without
+  # being named. Do not swap it for a plain nginx pointed at that directory.
+  #
+  # TO ENABLE, three steps.
+  #
+  # 1. Uncomment the service below. Every YAML line there has TWO spaces after its '#', and
+  # every line of prose like this one has one, so this only touches the service:
+  # sed -i -E 's/^  #(  |fastdl:)/  \1/' docker-compose.yml
+  #
+  # 2. Add these to EXTRA_CVARS above, with an address YOUR CLIENTS can reach -- a public host
+  # or IP, never a container name, because the game client resolves the URL itself. No trailing
+  # slash: the engine appends /maps/foo.bsp.
+  # sv_allowdownload 1
+  # sv_downloadurl "http://your-host-or-ip:8225/cstrike"
+  #
+  # 3. mkdir fastdl && docker compose up -d
+  #
+  # That ./fastdl directory starts empty and the first start writes the nginx template into it,
+  # so the default appears on your host ready to edit. Change it, restart, done. It is yours
+  # from then on -- nothing overwrites it. Leave the mount out entirely and the config baked
+  # into the image is used instead.
+  #
+  # Then check it rather than trusting it. A map answers 206, a secret must answer 403:
+  # curl -sI -r 0-0 http://your-host:8225/cstrike/maps/de_dust2.bsp
+  # curl -s -o /dev/null -w '%{http_code}' http://your-host:8225/cstrike/.rcon_password
+  #
+  # To build it from this repo instead of pulling, replace the image line with:
+  # build: {context: ., dockerfile: docker/fastdl/Dockerfile}
+  #
+  #fastdl:
+  #  image: ghcr.io/onixldlc/cs16-fastdl:latest
+  #  container_name: cs16-fastdl
+  #  restart: unless-stopped
+  #  ports:
+  #    - "8225:80"
+  #  volumes:
+  #    - hlds-content:/srv/hlds:ro
+  #    - ./fastdl:/opt/fastdl
+
 volumes:
   hlds-content:
   hlds-addons:

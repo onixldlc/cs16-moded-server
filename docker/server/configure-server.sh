@@ -18,7 +18,7 @@
 #                   enough players are in.
 #   BOTS            1 (default) fills the server with zBot bots, 0 disables them.
 #                   The bots are the Condition Zero ones inside ReGameDLL's cs.so. YaPB
-#                   ships in the image too but is not loaded -- see docker/install-mods.sh.
+#                   ships in the image too but is not loaded -- see docker/server/install-mods.sh.
 #   HUMAN_SLOTS     slots kept free for humans (default 5). Bots default to
 #                   MAXPLAYERS - HUMAN_SLOTS.
 #   BOT_QUOTA       explicit bot count, overrides the HUMAN_SLOTS calculation
