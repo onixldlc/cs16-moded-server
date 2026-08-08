@@ -31,7 +31,7 @@ FROM docker.io/library/debian:12-slim AS mods
 ENV DEBIAN_FRONTEND=noninteractive
 
 ARG METAMOD_TAG=v1.3.0.149-r2
-ARG PUGMOD_TAG=v1.0.1-pre
+ARG PUGMOD_TAG=v1.0.1-pre2
 ARG HITBOXFIXER_TAG=2.0.3
 ARG YAPB_TAG=4.4.957
 ARG REUNION_TAG=0.2.0.34
@@ -39,7 +39,7 @@ ARG ZBOT_ASSETS_REF=5.30.0.814
 
 RUN apt-get update
 
-RUN apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils file
+RUN apt-get install -y --no-install-recommends ca-certificates curl unzip xz-utils file binutils
 
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -94,6 +94,30 @@ RUN install -D -m 0755 /tmp/mods/reunion/addons/reunion/reunion_mm_i386.so \
 # reunion.cfg belongs in the gamedir, not in addons/, so install-mods.sh seeds it like
 # server.cfg. The plugin reads it once at load -- these settings have no cvars.
 RUN install -D -m 0644 /tmp/mods/reunion/reunion.cfg /opt/mods/cstrike/reunion.cfg
+
+# Does this PugMod build export the symbols of its statically linked libstdc++?
+#
+# If it does, loading Reunion beside it aborts the server at map start: Reunion links
+# libstdc++.so.6, so two C++ runtimes end up in one process and a std::locale facet
+# allocated by one is freed by the other. The verdict is recorded here, at build time,
+# where binutils is available -- install-mods.sh reads it and refuses to load Reunion
+# rather than letting the server boot-loop.
+#
+# The fix belongs in PugMod's Makefile:
+#   BUILD_LINKER=-Wl,--exclude-libs,ALL -static-libgcc -static-libstdc++ ...
+# With that, this file says 0 and Reunion loads.
+#
+# Only GLOBAL definitions of the four allocator symbols count. A fixed build still exports
+# WEAK _ZdlPvS_ and _ZnwjPv -- placement new/delete, inline stubs that allocate nothing --
+# so a looser pattern flags a good build as risky and Reunion never loads. Verified against
+# v1.0.1-pre (risky) and v1.0.1-pre2 (ok).
+RUN readelf -sW --dyn-syms /opt/mods/cstrike/addons/pugmod/dlls/pugmod_mm.so \
+        | awk '$4=="FUNC" && $5=="GLOBAL" && $7!="UND" {print $8}' \
+        | grep -qxE '_ZdlPv|_ZdaPv|_Znwj|_Znaj' \
+        && echo 1 > /opt/mods/.pugmod-cxx-exports \
+        || echo 0 > /opt/mods/.pugmod-cxx-exports
+
+RUN echo "pugmod exports its static libstdc++ symbols: $(cat /opt/mods/.pugmod-cxx-exports)"
 
 # zBot data. The bots themselves are compiled into ReGameDLL's cs.so, but without these
 # they cannot run: BotProfile.db is the roster of bot personalities, BotChatter.db plus
@@ -165,6 +189,8 @@ COPY docker/install-mods.sh /usr/local/bin/install-mods.sh
 
 COPY docker/configure-server.sh /usr/local/bin/configure-server.sh
 
+COPY docker/install-overlay.sh /usr/local/bin/install-overlay.sh
+
 COPY docker/fetch-nav.sh /usr/local/bin/fetch-nav.sh
 
 # On PATH under its own name, so it is callable with no path at all, plus a short alias:
@@ -180,6 +206,7 @@ RUN chmod +x /usr/local/bin/moded-entrypoint.sh \
         /usr/local/bin/install-mods.sh \
         /usr/local/bin/configure-server.sh \
         /usr/local/bin/fetch-nav.sh \
+        /usr/local/bin/install-overlay.sh \
         /usr/local/bin/rcon.sh \
         /usr/local/bin/verify.sh
 
@@ -217,6 +244,17 @@ RUN for so in /opt/mods/cstrike/addons/*/*.so /opt/mods/cstrike/addons/*/dlls/*.
 # RCON_ENABLED=0 to turn it off. EXTRA_CVARS holds your own console commands, one per
 # line, and they are applied after server.cfg so they win.
 ENV RCON_ENABLED=1
+
+# Reunion (non-Steam clients) is ON: letting friends without Steam connect is the point of
+# having it. install-mods.sh still declines to load it -- and says so -- if the PugMod build
+# in the volume is one that cannot coexist with it, so a bad pin degrades to "no Reunion"
+# instead of a boot loop. REUNION=off disables it outright.
+ENV REUNION=on
+
+# Drop-in directory for custom content. Mount a host directory here, laid out like
+# cstrike/, and everything in it is copied over the server on every start -- see
+# docker/install-overlay.sh. Empty or unmounted, it does nothing.
+ENV OVERLAY_DIR=/opt/overlay
 
 ENV ADDONS_DIR=/opt/hlds/cstrike/addons
 

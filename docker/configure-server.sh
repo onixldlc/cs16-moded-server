@@ -205,7 +205,13 @@ else
 fi
 
 if [ -n "${EXTRA_CVARS:-}" ]; then
+	# if/fi, not `[ -n "$line" ] && log`: EXTRA_CVARS normally ends with a newline, so the
+	# last line read is empty, and a false `&&` as the loop's final command would make this
+	# pipeline -- and this script -- exit 1. entrypoint.sh runs under `set -e`, so that
+	# boot-loops the container right before it hands over to the engine.
 	printf '%s\n' "$EXTRA_CVARS" | while read -r line; do
-		[ -n "$line" ] && log "extra: $line"
+		if [ -n "$line" ]; then
+			log "extra: $line"
+		fi
 	done
 fi

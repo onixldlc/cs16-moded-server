@@ -56,7 +56,12 @@ services:
       # first start and keeps only the meshes. Set ZBOT_NAV=none if you supply your own.
       #ZBOT_NAV: "czero"
 
-      # Reunion: what happens to clients with no Steam ticket (protocol 47/48).
+      # Reunion lets clients with no Steam ticket (protocol 47/48) connect. On by default;
+      # REUNION: "off" disables it. If the pinned PugMod build cannot coexist with it the
+      # image says so in the log and runs without it rather than boot-looping -- see README.
+      #REUNION: "off"
+
+      # What happens to clients with no Steam ticket.
       # allow (default) gives them a generated STEAM_x:y:z id from their IP, valve makes
       # it VALVE_x:y:z, reject drops them. Rewrites cid_NoSteam47/48 in
       # cstrike/reunion.cfg on every start; the rest of that file stays yours.
@@ -65,6 +70,12 @@ services:
       # Your own console commands, one per line. Applied after server.cfg, so these win.
       EXTRA_CVARS: |
         mp_consistency 0
+
+      # Engine command-line options -- the string you would put after ./hlds_run. For
+      # settings that are not console commands and can only be given at startup.
+      # Anything set here replaces the managed equivalent instead of being passed twice, so
+      # +maxplayers here would be used INSTEAD of MAXPLAYERS above. -heapsize is in KB.
+      #EXTRA_ARGS: "-nomaster -noipx -nojoy -pingboost 3 -heapsize 65536"
 
       # Stage the download inside the volume so moving it into place is a rename rather
       # than a 544 MB copy. The default (/tmp/hlds-fetch) sits on the container
@@ -75,6 +86,29 @@ services:
       #FORCE_REFETCH: "1"
 
     volumes:
+      # --- your own files, two ways -------------------------------------------------
+      #
+      # Uncomment what you use. Both need the host directory to exist first, or the
+      # container will not start.
+      #
+      # 1. MOUNT the real directory -- for cfgs and any single mod's own directory. Edit on
+      #    the host and it IS the server's copy. Start with an empty directory: an empty
+      #    mount is SEEDED with the image's cfgs on the next start, and once it has files
+      #    they are yours -- the mod install excludes it and never overwrites it. Keep it
+      #    writable, or an empty one cannot be seeded.
+      #
+      #- ./cfg:/opt/hlds/cstrike/addons/pugmod/cfg
+      #
+      # 2. COPY IN, for anything that shares a directory with Valve's content -- maps,
+      #    models, sound, sprites, gfx. Mounting ./maps over cstrike/maps would make the
+      #    stock 25 maps disappear, so these are copied over cstrike/ on every start
+      #    instead. Lay the directory out exactly like cstrike/:
+      #      mkdir -p overlay && unzip mypack.zip -d ./overlay
+      #      docker compose restart cs16
+      #    A pack rooted at cstrike/ is detected. Read-only: nothing writes back.
+      #
+      #- ./overlay:/opt/overlay:ro
+
       # Game content (~544 MB), fetched once.
       - hlds-content:/opt/hlds
       # Plugins and their configs, kept separate so hand-installed plugins and edited

@@ -27,6 +27,7 @@ test -x /usr/local/bin/server-entrypoint.sh || fail "missing server-entrypoint.s
 test -x /usr/local/bin/install-mods.sh    || fail "missing install-mods.sh"
 test -x /usr/local/bin/configure-server.sh || fail "missing configure-server.sh"
 test -x /usr/local/bin/fetch-nav.sh       || fail "missing fetch-nav.sh"
+test -x /usr/local/bin/install-overlay.sh || fail "missing install-overlay.sh"
 test -x /usr/local/bin/rcon.sh            || fail "missing rcon.sh"
 test -x /usr/local/bin/rcon               || fail "missing the rcon alias"
 
@@ -102,4 +103,34 @@ echo "[verify] hitbox_fix_mm       $(stat -c %s "$MODS_DIR/cstrike/addons/hitbox
 echo "[verify] yapb.so             $(stat -c %s "$MODS_DIR/cstrike/addons/yapb/bin/yapb.so") bytes, $(ls "$MODS_DIR"/cstrike/addons/yapb/data/graph/*.graph | wc -l) waypoint graphs"
 echo "[verify] reunion_mm_i386.so  $(stat -c %s "$MODS_DIR/cstrike/addons/reunion/reunion_mm_i386.so") bytes"
 echo "[verify] zbot data           BotProfile.db $(stat -c %s "$MODS_DIR/cstrike/BotProfile.db") bytes, $(find "$MODS_DIR/cstrike/sound/radio/bot" -name '*.wav' | wc -l) voice files"
+# --- the boot loop that shipped once ----------------------------------------
+
+# configure-server.sh is the last thing entrypoint.sh runs before handing over to the
+# engine, and entrypoint.sh runs under `set -e`. A multi-line EXTRA_CVARS -- what a compose
+# file's `EXTRA_CVARS: |` block always produces -- ends with a newline, so the loop that
+# echoes it back reads an empty final line. While that loop ended in
+# `[ -n "$line" ] && log`, the false test became the pipeline's exit status, the script
+# exited 1, and the container boot-looped with no error message at all: the log just stopped
+# after the last [configure] line. Assert the exit status directly.
+vdir=$(mktemp -d)
+mkdir -p "$vdir/cstrike"
+
+vfail() {
+	rm -rf "$vdir"
+	fail "$*"
+}
+
+if ! HLDS_DIR="$vdir" RCON_PASSWORD=verify-only EXTRA_CVARS='sv_aim 0
+mp_consistency 0
+' /usr/local/bin/configure-server.sh >/dev/null 2>&1; then
+	vfail "configure-server.sh exits non-zero with a multi-line EXTRA_CVARS — the container would boot-loop"
+fi
+
+test -f "$vdir/cstrike/cs16-moded.cfg" || vfail "configure-server.sh wrote no cs16-moded.cfg"
+grep -q '^mp_consistency 0' "$vdir/cstrike/cs16-moded.cfg" || vfail "cs16-moded.cfg lost an EXTRA_CVARS line"
+grep -q '^exec cs16-moded.cfg' "$vdir/cstrike/server.cfg" || vfail "server.cfg does not exec cs16-moded.cfg"
+
+rm -rf "$vdir"
+echo "[verify] configure-server.sh ok with a multi-line EXTRA_CVARS"
+
 echo "[verify] OK"

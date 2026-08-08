@@ -104,8 +104,43 @@ content.
 
 ## Non-Steam clients (Reunion)
 
-[Reunion](https://github.com/rehlds/ReUnion) is loaded **first** by metamod, so clients on
-protocol 47/48 with no Steam ticket can connect. Upstream's `reunion.cfg` ships
+**On by default** (`REUNION: "off"` to disable) — letting people without Steam connect is
+the whole point of having it.
+
+One caveat, handled automatically. A PugMod built `-static-libstdc++` that *also* exports
+`operator new`/`operator delete` cannot be loaded beside Reunion, which links
+`libstdc++.so.6`: two C++ runtimes in one process, and a `std::locale` facet allocated by one
+gets freed by the other, so the server aborts at map start with `free(): invalid pointer`
+(confirmed under gdb; reproduced with every Reunion build back to 0.1.0.129, in both load
+orders — Reunion alone, or with hitbox_fixer, is fine). The one-line fix in PugMod's
+`Makefile`:
+
+```make
+BUILD_LINKER=-Wl,--exclude-libs,ALL -static-libgcc -static-libstdc++ -lcurl -lssl -lcrypto -ldl -lm -lz
+```
+
+PugMod **`v1.0.1-pre2` and later carry the flag**, and that is what is pinned here — so
+Reunion just works. The check below stays as a guard against a future pin regressing.
+
+The build checks the pinned PugMod for those exports and records the answer in
+`/opt/mods/.pugmod-cxx-exports`. If the verdict is "risky", the server starts **without**
+Reunion and says so in the log, rather than boot-looping:
+
+```
+[install-mods] REUNION=on, but NOT loading it: this pugmod_mm.so exports its static libstdc++
+```
+
+Replace `pugmod_mm.so` in the addons volume with a fixed build, or bump `PUGMOD_TAG` to a
+release that carries the flag, and Reunion loads by itself.
+
+Reunion also **refuses to initialise without a hash salt** — upstream ships
+`SteamIdHashSalt` empty, and with `AuthVersion >= 3` that means `meta list` reports
+`fail load` while everything else looks healthy. A 32-char salt is generated on first start
+and then left alone, since it seasons the ids handed to non-Steam players; `REUNION_HASH_SALT`
+pins your own.
+
+[Reunion](https://github.com/rehlds/ReUnion) is loaded **first** by metamod,
+so clients on protocol 47/48 with no Steam ticket can connect. Upstream's `reunion.cfg` ships
 `cid_NoSteam47 = 5` / `cid_NoSteam48 = 5`, which *reject* exactly those clients — so those
 two lines are managed here and rewritten on every start from `REUNION_NOSTEAM`:
 
@@ -186,6 +221,34 @@ wrong passwords and your IP sits out an hour.
 
 Or point `EXTRA_CVARS_FILE` at a mounted file.
 
+## Engine launch options
+
+`EXTRA_CVARS` is console commands. Some settings are not console commands at all -- the
+engine only reads them from its command line at startup, and no cfg file can set them.
+Those go in `EXTRA_ARGS`:
+
+```yaml
+    environment:
+      EXTRA_ARGS: "-nomaster -noipx -nojoy -pingboost 3 -heapsize 65536 +maxplayers 32"
+```
+
+This is the same string you would put after `hlds.exe` or `./hlds_run`. It is appended to the
+managed command line (`-game cstrike -port ... -insecure +sv_lan ... +maxplayers ... +map
+...`), and any option you set there is **left out** of the managed part rather than written
+twice. So `+maxplayers 32` replaces `MAXPLAYERS` and `+map de_mirage_cs2` replaces `MAP`; the
+log says which ones were skipped.
+
+Duplicates are avoided because the engine does not resolve them the way you would expect.
+With both `+map de_dust2` and `+map de_mirage_cs2` on one command line it booted
+`de_mirage_cs2` and then immediately loaded `de_dust2` — the *first* value effectively won.
+Each option is emitted exactly once for that reason.
+
+`-heapsize` is in kilobytes (`65536` = 64 MB) and `-pingboost 3` changes the engine's timing
+loop -- both are worth understanding before copying them from a forum post.
+
+An option whose value contains spaces cannot go here, because the string is word-split into
+arguments. `hostname "Two Words"` belongs in `EXTRA_CVARS`.
+
 These land in `cstrike/cs16-moded.cfg`, which is regenerated on every start, and
 `server.cfg` gets **one** managed line appended:
 
@@ -198,6 +261,95 @@ That is deliberate. The engine execs `server.cfg` at map start, *after* the comm
 so `+rcon_password` on the command line loses to `rcon_password ""` on line 2 of PugMod'"'"'s
 server.cfg. An `exec` at the end of `server.cfg` runs last, so your values win. Everything
 else in `server.cfg` stays yours.
+
+## Your own cfgs and content
+
+Two mechanisms, and which one to use is decided by one fact: **a mount hides whatever was
+underneath it.** Not a design choice, just how mounts work — and podman's `:O` overlay flag
+behaves the same way, tested.
+
+### Mount the real directory — for cfgs
+
+Mount your own directory straight onto the real path:
+
+```yaml
+    volumes:
+      - ./cfg:/opt/hlds/cstrike/addons/pugmod/cfg
+```
+
+Edit a file on the host and it *is* the server's copy — nothing is copied, nothing to
+re-sync, no restart to pick up a file change.
+
+**You do not have to fill the directory first.** Which way the mount goes is decided by one
+thing, whether it is empty:
+
+| directory | what happens |
+|---|---|
+| empty | seeded with the image's own cfgs on the next start |
+| non-empty | yours — excluded from the mod install, never overwritten |
+
+```
+[install-mods] seeded pugmod/cfg from the image (16 files) — the mount was empty
+[install-mods] pugmod/cfg is yours (mounted, not empty) — left alone
+```
+
+So `mkdir cfg`, start once, and the real defaults appear on the host for you to edit. After
+that an image update cannot revert them: the install excludes that directory outright, and
+says so in the log.
+
+Emptiness is the signal because a fresh named volume or a fresh host directory is empty by
+definition, and one that has been used is not. It is checked on every start, not only when the
+mod version changes — the mount may be new while the mods are already current.
+
+Mount it **writable** for this to work. Read-only also works once it has files in it, but an
+empty read-only mount cannot be seeded, and the image warns rather than starting a server
+whose plugin has no configs:
+
+```
+[install-mods] WARNING: pugmod/cfg is mounted, empty and not writable — the plugin will
+              find nothing there. Mount it writable for one start and it will be filled in.
+```
+
+This works for any directory in the addons tree, not just PugMod's cfgs — mount
+`addons/reunion` or a plugin's data directory the same way.
+
+### Copy in — for maps, models, sound, sprites, gfx
+
+These share a directory with Valve's content. Mounting `./maps` onto `cstrike/maps` would make
+the stock 25 maps *disappear*, so this path copies over `cstrike/` on every start instead:
+
+```bash
+mkdir -p overlay && unzip modpack1.zip -d ./overlay
+docker compose restart cs16
+```
+
+```
+overlay/maps/de_mirage_cs2.bsp         -> cstrike/maps/de_mirage_cs2.bsp
+overlay/server.cfg                     -> cstrike/server.cfg
+overlay/addons/pugmod/cfg/pugmod.cfg   -> cstrike/addons/pugmod/cfg/pugmod.cfg
+```
+
+`addons/` works here too even though it is a separate volume: the copy runs *inside* the
+container, where `cstrike/addons` is already that volume's mount point. Copying into the
+content volume's `addons/` from the *host* is the one thing that does **not** work — it writes
+underneath the mount, where nothing reads it. A pack rooted at `cstrike/` is detected, so
+`unzip pack.zip -d ./overlay` works whichever way the pack was built.
+
+```
+[overlay] copied 347 files from /opt/overlay into /opt/hlds/cstrike
+[overlay]   maps: 59 files
+[overlay]   models: 96 files
+```
+
+Three limits worth knowing: it never deletes (removing a file from the overlay leaves the copy
+in the volume), `liblist.gam` is ignored because the image rewrites it every start, and
+`game_init.cfg` is ignored in practice because `/opt/dist` is copied over `cstrike/` *after*
+the overlay. It runs after the image's own mods, so the overlay wins over those; and before
+the cvar generation, so an overlaid `server.cfg` still gets its managed `exec cs16-moded.cfg`.
+
+Neither directory is committed — both are in `.gitignore`. They are per-deployment.
+
+With plain `docker run` / `podman run`, add `-v /path/to/overlay:/opt/overlay:ro`.
 
 ## Update
 
@@ -229,7 +381,7 @@ Edit the ARGs in `docker/Dockerfile`:
 
 ```dockerfile
 ARG METAMOD_TAG=v1.3.0.149-r2
-ARG PUGMOD_TAG=v1.0.1-pre
+ARG PUGMOD_TAG=v1.0.1-pre2
 ARG HITBOXFIXER_TAG=2.0.3
 ARG YAPB_TAG=4.4.957
 ARG REUNION_TAG=0.2.0.34
@@ -264,6 +416,8 @@ docker/Dockerfile          two stages: fetch the mod releases, layer them on cs1
 docker/entrypoint.sh       content -> mods -> hand over to the base entrypoint
 docker/install-mods.sh     marker-based sync into the volumes
 docker/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
+docker/install-overlay.sh  copies the host drop-in directory over cstrike/ each start
+cfg/, overlay/              per-deployment, gitignored: mounted cfgs and copied-in content
 script/rcon.sh             the client that ships into the image as /usr/local/bin/rcon.sh
 bin/rcon                   run this: finds the container, opens the prompt
 docker/verify.sh           image self-check
