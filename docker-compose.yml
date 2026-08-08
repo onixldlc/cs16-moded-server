@@ -86,28 +86,24 @@ services:
       #FORCE_REFETCH: "1"
 
     volumes:
-      # --- your own files, two ways -------------------------------------------------
+      # --- your own maps, models, sounds and cfgs -----------------------------------
       #
-      # Uncomment what you use. Both need the host directory to exist first, or the
-      # container will not start.
+      # ONE directory, laid out exactly like cstrike/. Unzip a pack into it and restart --
+      # any depth, any subdirectory, cfgs included. Nothing needs sorting by hand:
       #
-      # 1. MOUNT the real directory -- for cfgs and any single mod's own directory. Edit on
-      #    the host and it IS the server's copy. Start with an empty directory: an empty
-      #    mount is SEEDED with the image's cfgs on the next start, and once it has files
-      #    they are yours -- the mod install excludes it and never overwrites it. Keep it
-      #    writable, or an empty one cannot be seeded.
+      #   mkdir -p content && unzip yourpack.zip -d ./content
+      #   docker compose restart cs16
       #
-      #- ./cfg:/opt/hlds/cstrike/addons/pugmod/cfg
+      # Both pack layouts work, and both at once: a flat pack (content/maps/...) and a
+      # cstrike/-rooted one (content/cstrike/maps/...) are merged.
       #
-      # 2. COPY IN, for anything that shares a directory with Valve's content -- maps,
-      #    models, sound, sprites, gfx. Mounting ./maps over cstrike/maps would make the
-      #    stock 25 maps disappear, so these are copied over cstrike/ on every start
-      #    instead. Lay the directory out exactly like cstrike/:
-      #      mkdir -p overlay && unzip mypack.zip -d ./overlay
-      #      docker compose restart cs16
-      #    A pack rooted at cstrike/ is detected. Read-only: nothing writes back.
+      # It is copied over cstrike/ on every start rather than mounted, because a mount HIDES
+      # what was under it -- mounting content/maps onto cstrike/maps would make Valve's stock
+      # 25 maps disappear instead of adding yours. The copy overwrites, never deletes, and
+      # wins over what the image ships.
       #
-      #- ./overlay:/opt/overlay:ro
+      # Uncomment after creating the directory, or the container will not start.
+      #- ./content:/opt/overlay:ro
 
       # Game content (~544 MB), fetched once.
       - hlds-content:/opt/hlds

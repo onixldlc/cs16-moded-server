@@ -262,94 +262,89 @@ so `+rcon_password` on the command line loses to `rcon_password ""` on line 2 of
 server.cfg. An `exec` at the end of `server.cfg` runs last, so your values win. Everything
 else in `server.cfg` stays yours.
 
-## Your own cfgs and content
+## Your own maps, models, sounds and cfgs
 
-Two mechanisms, and which one to use is decided by one fact: **a mount hides whatever was
-underneath it.** Not a design choice, just how mounts work — and podman's `:O` overlay flag
-behaves the same way, tested.
-
-### Mount the real directory — for cfgs
-
-Mount your own directory straight onto the real path:
+One directory, laid out exactly like `cstrike/`. Unzip a pack into it, restart, done — any
+depth, any subdirectory, cfgs included. Nothing needs sorting by hand.
 
 ```yaml
     volumes:
-      - ./cfg:/opt/hlds/cstrike/addons/pugmod/cfg
+      - ./content:/opt/overlay:ro
 ```
 
-Edit a file on the host and it *is* the server's copy — nothing is copied, nothing to
-re-sync, no restart to pick up a file change.
+```bash
+mkdir -p content && unzip yourpack.zip -d ./content
+docker compose restart cs16
+```
 
-**You do not have to fill the directory first.** Which way the mount goes is decided by one
-thing, whether it is empty:
+```
+content/server.cfg                     -> cstrike/server.cfg
+content/maps/de_mirage_cs2.bsp         -> cstrike/maps/de_mirage_cs2.bsp
+content/maps/de_mirage_cs2.nav         -> cstrike/maps/de_mirage_cs2.nav
+content/addons/pugmod/cfg/pugmod.cfg   -> cstrike/addons/pugmod/cfg/pugmod.cfg
+```
 
-| directory | what happens |
-|---|---|
-| empty | seeded with the image's own cfgs on the next start |
-| non-empty | yours — excluded from the mod install, never overwritten |
+**Both pack layouts work, and both at once.** Packs come rooted either way, and mixing them is
+the normal case once you have two of them:
+
+```
+content/maps/...            flat, already relative to cstrike/
+content/cstrike/maps/...    cstrike/-rooted, e.g. unzip pack.zip -d ./content
+```
+
+The flat part is applied first and the `cstrike/` part second, so the more specific layout wins
+a conflict. (An earlier version picked `content/cstrike` as the *only* root when it existed,
+which silently ignored everything in a flat pack sitting next to it.)
+
+The log says what landed:
+
+```
+[overlay] copied 346 files from /opt/overlay
+[overlay]   maps: 59 files
+[overlay]   addons: 16 files
+[overlay]   maps/*.nav now installed: 65
+```
+
+`addons/` needs no special handling even though it is a separate volume: the copy runs *inside*
+the container, where `cstrike/addons` is already that volume's mount point. Copying into the
+content volume's `addons/` from the *host* is the one thing that does **not** work — it writes
+underneath the mount, where nothing reads it.
+
+### Why copied and not mounted
+
+Because **a mount hides whatever was underneath it** — a plain bind mount and podman's `:O`
+both do, tested. Mounting `content/maps` onto `cstrike/maps` would make Valve's stock 25 maps
+disappear instead of adding yours to them, and the same goes for `models`, `sound`, `sprites`
+and `gfx`.
+
+Three limits: the copy never deletes (removing a file from `content/` leaves the copy in the
+volume), `liblist.gam` is ignored because the image rewrites it every start, and `game_init.cfg`
+is ignored in practice because `/opt/dist` is copied over `cstrike/` *afterwards*. It runs after
+the image's own mods, so your files win over those; and before the cvar generation, so an
+overlaid `server.cfg` still gets its managed `exec cs16-moded.cfg` line.
+
+`content/` is gitignored — it is per-deployment, and usually large.
+
+### Optional: one directory live instead of copied
+
+If there is a directory you tune constantly and a restart is annoying, mount that one directly
+and edits become instant, because the file on disk *is* the file the server reads:
+
+```yaml
+      - ./live-cfg:/opt/hlds/cstrike/addons/pugmod/cfg
+```
+
+Empty when the server starts and it is seeded with the image's own copy; non-empty and it is
+yours — the mod install excludes it and an image update never overwrites it, which it says in
+the log:
 
 ```
 [install-mods] seeded pugmod/cfg from the image (16 files) — the mount was empty
 [install-mods] pugmod/cfg is yours (mounted, not empty) — left alone
 ```
 
-So `mkdir cfg`, start once, and the real defaults appear on the host for you to edit. After
-that an image update cannot revert them: the install excludes that directory outright, and
-says so in the log.
-
-Emptiness is the signal because a fresh named volume or a fresh host directory is empty by
-definition, and one that has been used is not. It is checked on every start, not only when the
-mod version changes — the mount may be new while the mods are already current.
-
-Mount it **writable** for this to work. Read-only also works once it has files in it, but an
-empty read-only mount cannot be seeded, and the image warns rather than starting a server
-whose plugin has no configs:
-
-```
-[install-mods] WARNING: pugmod/cfg is mounted, empty and not writable — the plugin will
-              find nothing there. Mount it writable for one start and it will be filled in.
-```
-
-This works for any directory in the addons tree, not just PugMod's cfgs — mount
-`addons/reunion` or a plugin's data directory the same way.
-
-### Copy in — for maps, models, sound, sprites, gfx
-
-These share a directory with Valve's content. Mounting `./maps` onto `cstrike/maps` would make
-the stock 25 maps *disappear*, so this path copies over `cstrike/` on every start instead:
-
-```bash
-mkdir -p overlay && unzip modpack1.zip -d ./overlay
-docker compose restart cs16
-```
-
-```
-overlay/maps/de_mirage_cs2.bsp         -> cstrike/maps/de_mirage_cs2.bsp
-overlay/server.cfg                     -> cstrike/server.cfg
-overlay/addons/pugmod/cfg/pugmod.cfg   -> cstrike/addons/pugmod/cfg/pugmod.cfg
-```
-
-`addons/` works here too even though it is a separate volume: the copy runs *inside* the
-container, where `cstrike/addons` is already that volume's mount point. Copying into the
-content volume's `addons/` from the *host* is the one thing that does **not** work — it writes
-underneath the mount, where nothing reads it. A pack rooted at `cstrike/` is detected, so
-`unzip pack.zip -d ./overlay` works whichever way the pack was built.
-
-```
-[overlay] copied 347 files from /opt/overlay into /opt/hlds/cstrike
-[overlay]   maps: 59 files
-[overlay]   models: 96 files
-```
-
-Three limits worth knowing: it never deletes (removing a file from the overlay leaves the copy
-in the volume), `liblist.gam` is ignored because the image rewrites it every start, and
-`game_init.cfg` is ignored in practice because `/opt/dist` is copied over `cstrike/` *after*
-the overlay. It runs after the image's own mods, so the overlay wins over those; and before
-the cvar generation, so an overlaid `server.cfg` still gets its managed `exec cs16-moded.cfg`.
-
-Neither directory is committed — both are in `.gitignore`. They are per-deployment.
-
-With plain `docker run` / `podman run`, add `-v /path/to/overlay:/opt/overlay:ro`.
+Keep it writable, or an empty one cannot be seeded (the image warns). Most deployments do not
+need this — `content/` handles cfgs perfectly well, one restart later.
 
 ## Update
 
@@ -417,7 +412,7 @@ docker/entrypoint.sh       content -> mods -> hand over to the base entrypoint
 docker/install-mods.sh     marker-based sync into the volumes
 docker/fetch-nav.sh        one-off steamcmd fetch of the zBot navigation meshes
 docker/install-overlay.sh  copies the host drop-in directory over cstrike/ each start
-cfg/, overlay/              per-deployment, gitignored: mounted cfgs and copied-in content
+content/                   your drop-in directory: per-deployment, gitignored
 script/rcon.sh             the client that ships into the image as /usr/local/bin/rcon.sh
 bin/rcon                   run this: finds the container, opens the prompt
 docker/verify.sh           image self-check
