@@ -37,6 +37,30 @@ Server console:
 docker attach cs16-moded-server     # detach with Ctrl-P Ctrl-Q
 ```
 
+## Every knob
+
+All of it is environment, set in `docker-compose.yml`. Nothing else needs editing.
+
+| variable | default | what it does |
+|---|---|---|
+| `MAP` | `de_dust2` | first map |
+| `MAXPLAYERS` | `12` | slots |
+| `SV_LAN` | `0` | `1` keeps it off the master list |
+| `INSECURE` | `1` | `1` = no VAC, no Steam account needed. `0` needs `STEAM_ACCOUNT` |
+| `STEAM_ACCOUNT` | unset | Game Server Login Token, for a VAC-secure public server |
+| `RCON_PASSWORD` | generated | 32 random chars on first start, kept in the volume — see below |
+| `RCON_ENABLED` | `1` | `0` turns RCON off |
+| `EXTRA_CVARS` | — | console commands, one per line, applied after `server.cfg` |
+| `EXTRA_ARGS` | — | engine command line — see [Engine launch options](#engine-launch-options) |
+| `ZBOT_NAV` | `czero` | where bot nav meshes come from; `none` if you supply your own |
+| `REUNION` | `on` | non-Steam clients (protocol 47/48) |
+| `REUNION_NOSTEAM` | `allow` | `allow` │ `valve` │ `reject` for clients with no Steam ticket |
+| `STAGE_DIR` | `/tmp/hlds-fetch` | where the download is staged. Set it inside the volume (`/opt/hlds/.staging`) and moving it into place is a rename instead of a 544 MB copy — the default sits on the container filesystem, and in RAM if `/tmp` is a tmpfs |
+| `FORCE_REFETCH` | unset | `1` for one start re-downloads and re-prunes the game content |
+
+The port is not an env var: it is the **left** side of `ports: - "8222:27015/udp"`. Leave the
+right side at the engine'"'"'s 27015.
+
 ## RCON (always on)
 
 RCON is enabled on every start. Leave `RCON_PASSWORD` unset and a **32-char random
@@ -456,11 +480,46 @@ sv_allowdownload 1
 sv_downloadurl "http://your-host:8225/cstrike"
 ```
 
-The compose file carries the same thing as a commented service with the full instructions.
-
 It serves **the server's own content volume, read-only** — not a copy. So what a client
 downloads is byte-for-byte what the server runs: no sync step, and the mirror cannot hand out a
 map the server has already replaced.
+
+### Enabling it in `docker-compose.yml`
+
+The compose file carries it as a commented-out second service. Three steps:
+
+```bash
+# 1. uncomment the service. Every YAML line in it has TWO spaces after its '#' and every
+#    comment line has one, so this touches the service and nothing else.
+sed -i -E 's/^  #(  |fastdl:)/  \1/' docker-compose.yml
+
+# 2. create the config directory (it gets seeded on the first start)
+mkdir fastdl
+
+# 3. up
+docker compose up -d
+```
+
+Then add these to `EXTRA_CVARS`, with an address **your clients** can reach — no trailing
+slash, the engine appends `/maps/foo.bsp`:
+
+```
+sv_allowdownload 1
+sv_downloadurl "http://your-host-or-ip:8225/cstrike"
+```
+
+Check it rather than trusting it. A map answers 206, a secret must answer 403:
+
+```bash
+curl -sI -r 0-0 http://your-host:8225/cstrike/maps/de_dust2.bsp
+curl -s -o /dev/null -w '%{http_code}\n' http://your-host:8225/cstrike/.rcon_password
+```
+
+To build it from this repo instead of pulling, replace the `image:` line with:
+
+```yaml
+    build: {context: ., dockerfile: docker/fastdl/Dockerfile}
+```
 
 ### Changing its config
 

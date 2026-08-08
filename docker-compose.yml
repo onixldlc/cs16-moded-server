@@ -1,29 +1,9 @@
-# Modded Counter-Strike 1.6 server: ReHLDS + ReGameDLL_CS + Metamod-R + PugMod + zBot
-# bots + Reunion (non-Steam clients). YaPB ships too, one env away.
+# Modded Counter-Strike 1.6: ReHLDS + ReGameDLL_CS + Metamod-R + PugMod + zBot + Reunion.
 #
-#   docker compose up -d
-#   docker compose logs -f
+#   docker compose up -d && docker compose logs -f
 #
-# The FIRST start downloads ~544 MB of game content from Steam into the hlds-content
-# volume. That takes minutes, not seconds -- the server is unreachable until the log
-# says "content ready". Every start after that is immediate.
-#
-# Nothing here redistributes Valve content: each deployment fetches its own copy with
-# steamcmd under its own Steam Subscriber Agreement.
-#
-# Updating:  docker compose pull && docker compose up -d
-# Engine, game dll and mods are re-installed from the image; game content is untouched.
-#
-# Server console (HLDS reads commands from stdin):  docker attach cs16-moded-server
-# Detach without killing it: Ctrl-P Ctrl-Q
-#
-# Easier: an RCON prompt. No attaching, no password to type -- it reads the generated one
-# out of the volume. From the repo:
-#   ./bin/rcon                                prompt
-#   ./bin/rcon status                         one command
-# or straight at the container:
-#   docker compose exec cs16 rcon.sh
-#   docker compose exec cs16 rcon "changelevel de_aztec"
+# The first start downloads ~544 MB from Steam and the server is unreachable until the log says
+# "content ready". Every knob, and everything below, is explained in README.md.
 
 services:
   cs16:
@@ -31,138 +11,52 @@ services:
     container_name: cs16-moded-server
     restart: unless-stopped
 
-    # Host 8222 -> the engine's stock 27015 inside the container. Change the LEFT side
-    # to move the public port; leave PORT alone.
+    # Public port is the left side only.
     ports:
       - "8222:27015/udp"
 
     environment:
-      # No VAC, so no Steam account and no Game Server Login Token is needed.
-      # For a VAC-secure public server: INSECURE=0 and STEAM_ACCOUNT=<token>.
       INSECURE: "1"
       MAP: de_dust2
       MAXPLAYERS: "12"
       SV_LAN: "0"
       #STEAM_ACCOUNT: ""
 
-      # RCON is always on. Leave RCON_PASSWORD unset and a 32-char password is generated
-      # on first start, printed in the log and remembered in the content volume:
-      #   docker compose logs | grep "RCON is ON"
-      # Pin your own instead, or set RCON_ENABLED: "0" to turn RCON off.
+      # Unset: 32 random chars on first start, printed in the log, kept in the volume.
       #RCON_PASSWORD: ""
+      #RCON_ENABLED: "0"
 
-      # Bots are zBot, inside ReGameDLL's cs.so. They need maps/*.nav, which CS 1.6 does
-      # not ship -- ZBOT_NAV=czero (default) fetches Condition Zero's with steamcmd on
-      # first start and keeps only the meshes. Set ZBOT_NAV=none if you supply your own.
-      #ZBOT_NAV: "czero"
+      #ZBOT_NAV: "czero"          # czero | none
+      #REUNION: "off"             # non-Steam clients, on by default
+      #REUNION_NOSTEAM: "allow"   # allow | valve | reject
 
-      # Reunion lets clients with no Steam ticket (protocol 47/48) connect. On by default;
-      # REUNION: "off" disables it. If the pinned PugMod build cannot coexist with it the
-      # image says so in the log and runs without it rather than boot-looping -- see README.
-      #REUNION: "off"
-
-      # What happens to clients with no Steam ticket.
-      # allow (default) gives them a generated STEAM_x:y:z id from their IP, valve makes
-      # it VALVE_x:y:z, reject drops them. Rewrites cid_NoSteam47/48 in
-      # cstrike/reunion.cfg on every start; the rest of that file stays yours.
-      #REUNION_NOSTEAM: "allow"
-
-      # Your own console commands, one per line. Applied after server.cfg, so these win.
+      # Console commands, one per line, applied after server.cfg.
       EXTRA_CVARS: |
         mp_consistency 0
 
-      # Engine command-line options -- the string you would put after ./hlds_run. For
-      # settings that are not console commands and can only be given at startup.
-      # Anything set here replaces the managed equivalent instead of being passed twice, so
-      # +maxplayers here would be used INSTEAD of MAXPLAYERS above. -heapsize is in KB.
+      # Engine command line. Replaces the managed equivalent rather than being passed twice.
       #EXTRA_ARGS: "-nomaster -noipx -nojoy -pingboost 3 -heapsize 65536"
 
-      # Stage the download inside the volume so moving it into place is a rename rather
-      # than a 544 MB copy. The default (/tmp/hlds-fetch) sits on the container
-      # filesystem: double the space, and in RAM if /tmp is a tmpfs.
+      # Inside the volume, so installing the download is a rename and not a 544 MB copy.
       STAGE_DIR: /opt/hlds/.staging
 
-      # Set to 1 for one start to re-download and re-prune the game content.
       #FORCE_REFETCH: "1"
 
     volumes:
-      # --- your own maps, models, sounds and cfgs -----------------------------------
-      #
-      # ONE directory, laid out exactly like cstrike/. Unzip a pack into it and restart --
-      # any depth, any subdirectory, cfgs included. Nothing needs sorting by hand:
-      #
-      #   mkdir -p content && unzip yourpack.zip -d ./content
-      #   docker compose restart cs16
-      #
-      # Both pack layouts work, and both at once: a flat pack (content/maps/...) and a
-      # cstrike/-rooted one (content/cstrike/maps/...) are merged.
-      #
-      # It is copied over cstrike/ on every start rather than mounted, because a mount HIDES
-      # what was under it -- mounting content/maps onto cstrike/maps would make Valve's stock
-      # 25 maps disappear instead of adding yours. The copy overwrites, never deletes, and
-      # wins over what the image ships.
-      #
-      # Uncomment after creating the directory, or the container will not start.
+      # Your own maps, models, sounds and cfgs: one directory laid out like cstrike/, copied
+      # over the game on every start. Create it before uncommenting.
       #- ./content:/opt/overlay:ro
 
-      # Game content (~544 MB), fetched once.
       - hlds-content:/opt/hlds
-      # Plugins and their configs, kept separate so hand-installed plugins and edited
-      # cfgs survive an image update. The image reinstalls its own mods here only when
-      # its version marker changes.
       - hlds-addons:/opt/hlds/cstrike/addons
 
     stdin_open: true
     tty: true
 
-  # --- fastdl: HTTP downloads for clients (optional) --------------------------------------
-  #
-  # WHAT IT IS. A client that joins without your custom maps downloads them through the game's
-  # own UDP socket at roughly 10-20 KB/s, one file at a time, blocking the join. For a 17 MB
-  # map that is about twenty minutes, and most people quit. sv_downloadurl points clients at
-  # plain HTTP instead: as fast as their connection, and resumable.
-  #
-  # DO YOU NEED IT. Only for clients that do not already have your content. If everyone
-  # installed the same pack by hand, or you run stock maps only, this changes nothing -- the
-  # server plays identically without it. CS does not require any of this.
-  #
-  # HOW IT WORKS. It serves the server's own content volume, read-only. Not a copy: what a
-  # client downloads is byte-for-byte what the server is running, so there is no sync step and
-  # the mirror can never hand out a map the server has already replaced.
-  #
-  # WHAT IT REFUSES, AND WHY THAT MATTERS. That volume is not only client content. Next to the
-  # maps sit cstrike/.rcon_password and cstrike/cs16-moded.cfg, both holding your rcon password
-  # in plain text, plus server.cfg, rehlds.cfg, reunion.cfg, and addons/ with its adminlist.
-  # The image's config is an allowlist: only bsp/wad/mdl/wav/mp3/spr/tga/bmp/txt/res are
-  # served, addons/ is denied outright, and anything else including dotfiles is refused without
-  # being named. Do not swap it for a plain nginx pointed at that directory.
-  #
-  # TO ENABLE, three steps.
-  #
-  # 1. Uncomment the service below. Every YAML line there has TWO spaces after its '#', and
-  # every line of prose like this one has one, so this only touches the service:
-  # sed -i -E 's/^  #(  |fastdl:)/  \1/' docker-compose.yml
-  #
-  # 2. Add these to EXTRA_CVARS above, with an address YOUR CLIENTS can reach -- a public host
-  # or IP, never a container name, because the game client resolves the URL itself. No trailing
-  # slash: the engine appends /maps/foo.bsp.
-  # sv_allowdownload 1
-  # sv_downloadurl "http://your-host-or-ip:8225/cstrike"
-  #
-  # 3. mkdir fastdl && docker compose up -d
-  #
-  # That ./fastdl directory starts empty and the first start writes the nginx template into it,
-  # so the default appears on your host ready to edit. Change it, restart, done. It is yours
-  # from then on -- nothing overwrites it. Leave the mount out entirely and the config baked
-  # into the image is used instead.
-  #
-  # Then check it rather than trusting it. A map answers 206, a secret must answer 403:
-  # curl -sI -r 0-0 http://your-host:8225/cstrike/maps/de_dust2.bsp
-  # curl -s -o /dev/null -w '%{http_code}' http://your-host:8225/cstrike/.rcon_password
-  #
-  # To build it from this repo instead of pulling, replace the image line with:
-  # build: {context: ., dockerfile: docker/fastdl/Dockerfile}
-  #
+  # Optional HTTP download mirror for clients (sv_downloadurl). Serves the content volume
+  # read-only through an allowlist, so it never hands out cfgs or the rcon password.
+  # Enable: sed -i -E 's/^  #(  |fastdl:)/  \1/' docker-compose.yml && mkdir fastdl
+  # Then set sv_allowdownload and sv_downloadurl in EXTRA_CVARS above.
   #fastdl:
   #  image: ghcr.io/onixldlc/cs16-fastdl:latest
   #  container_name: cs16-fastdl
